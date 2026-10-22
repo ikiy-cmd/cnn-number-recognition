@@ -1,0 +1,29 @@
+# Local Python environment and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Downloaded MNIST files are restored automatically on startup
+/data/
+
+# Keep the demonstration model, metrics and screenshots; omit runtime state
+/artifacts/train_state.json
+/artifacts/*.log
+/artifacts/*.tmp
+*.log
+*.tmp
+
+# Local secrets and editor settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

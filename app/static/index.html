@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080a08">
+  <title>层迹 Layer Trace · 手写数字识别实验台</title>
+  <meta name="description" content="一个本地运行的 CNN 手写数字识别实验台：10 层卷积，每层独立判读，实时比较 1 到 10 层的识别率，并可在浏览器里重新训练。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23080a08'/%3E%3Crect x='5' y='5' width='6' height='6' fill='%23c9f65a'/%3E%3Crect x='13' y='5' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='21' y='5' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='5' y='13' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='13' y='13' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='21' y='13' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='5' y='21' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='13' y='21' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3Crect x='21' y='21' width='6' height='6' fill='%23e9eddf' opacity='.35'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page-grid" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="层迹 Layer Trace 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <i class="on"></i><i></i><i></i>
+          <i></i><i></i><i></i>
+          <i></i><i></i><i></i>
+        </span>
+        <span class="brand-text">
+          <b>层迹</b>
+          <small>LAYER TRACE</small>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="页面导航">
+        <a class="nav-link active" href="#lab">识别台</a>
+        <a class="nav-link" href="#layers">逐层识别</a>
+        <a class="nav-link" href="#vision">CNN 内部</a>
+        <a class="nav-link" href="#train">训练台</a>
+      </nav>
+
+      <div class="top-actions">
+        <div class="status" id="model-status">
+          <i class="dot"></i>
+          <span id="model-status-text">连接中</span>
+        </div>
+        <a class="ghost-btn" href="#train">重新训练</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="intro" aria-labelledby="intro-title">
+      <div class="intro-copy">
+        <p class="kicker">CNN · MNIST · 10 CONV LAYERS</p>
+        <h1 id="intro-title">写一个数字，看它穿过十层卷积。</h1>
+        <p class="lede">每层卷积后都有独立判读头。拖动深度，看答案如何逐层改变。</p>
+      </div>
+      <dl class="intro-stats" aria-label="模型概览">
+        <div class="stat">
+          <dt>TEST ACCURACY</dt>
+          <dd><span id="stat-acc">--</span><em>%</em></dd>
+        </div>
+        <div class="stat">
+          <dt>PARAMETERS</dt>
+          <dd id="stat-params">--</dd>
+        </div>
+        <div class="stat">
+          <dt>CONV DEPTH</dt>
+          <dd>10</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section id="lab" class="lab-grid" aria-label="手写数字识别台">
+      <div class="panel canvas-panel">
+        <div class="panel-head">
+          <div class="panel-title-wrap">
+            <h2 class="panel-title">书写区</h2>
+            <span class="panel-sub" id="canvas-sub">用鼠标或手指写一个 0 到 9</span>
+          </div>
+          <div class="panel-tools">
+            <button class="text-btn" id="undo-btn" type="button">撤销</button>
+            <button class="text-btn" id="clear-btn" type="button">清空</button>
+            <label class="text-btn file-btn" tabindex="0" role="button" aria-label="上传数字图片">
+              上传
+              <input id="file-input" type="file" accept="image/*" hidden>
+            </label>
+          </div>
+        </div>
+
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="pad" width="840" height="840" aria-label="手写数字输入画布"></canvas>
+          <div class="canvas-hint" id="canvas-hint">
+            <span>在这里写一个数字</span>
+            <small>笔迹只在本机处理</small>
+          </div>
+          <span class="canvas-tick tick-tl" aria-hidden="true"></span>
+          <span class="canvas-tick tick-tr" aria-hidden="true"></span>
+          <span class="canvas-tick tick-bl" aria-hidden="true"></span>
+          <span class="canvas-tick tick-br" aria-hidden="true"></span>
+        </div>
+
+        <div class="canvas-footer">
+          <div class="brush-control">
+            <label for="brush-range">笔宽</label>
+            <input id="brush-range" type="range" min="10" max="34" step="1" value="21">
+            <output id="brush-value" for="brush-range">21</output>
+          </div>
+          <div class="preview-control">
+            <span>28 × 28 输入</span>
+            <canvas id="preview" width="112" height="112" aria-label="模型输入预览"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel result-panel" id="result-panel">
+        <div class="panel-head">
+          <div class="panel-title-wrap">
+            <h2 class="panel-title">判读</h2>
+            <span class="panel-sub" id="probe-sub">PROBE 10 · 128 CH · 3 × 3</span>
+          </div>
+          <span class="result-state" id="result-state">待输入</span>
+        </div>
+
+        <div class="depth-control">
+          <div class="depth-head">
+            <label for="depth-range">判读深度</label>
+            <div class="depth-head-right">
+              <output id="depth-output" for="depth-range">L10</output>
+              <button class="text-btn depth-replay" id="replay-result" type="button" disabled>重播</button>
+            </div>
+          </div>
+          <input id="depth-range" type="range" min="1" max="10" step="1" value="10">
+          <div class="depth-ticks" id="depth-ticks" aria-hidden="true"></div>
+        </div>
+
+        <div class="readout">
+          <div class="digit-block">
+            <span class="digit-kicker" id="digit-kicker">CONV 10 OUTPUT</span>
+            <span class="big-digit is-empty" id="big-digit">?</span>
+          </div>
+          <div class="confidence-block">
+            <span class="confidence-label">置信度</span>
+            <div class="confidence-value"><span id="confidence">--</span><em>%</em></div>
+            <span class="confidence-note" id="confidence-note">等待书写</span>
+          </div>
+        </div>
+
+        <div class="prob-wrap">
+          <div class="prob-head">
+            <span>10 类概率</span>
+            <span class="mono" id="prob-depth">L10</span>
+          </div>
+          <div class="prob-chart" id="prob-chart" aria-label="十个数字类别的概率分布"></div>
+        </div>
+
+        <div class="result-meta">
+          <div class="meta-cell">
+            <span>本层测试集识别率</span>
+            <b id="meta-acc">--</b>
+          </div>
+          <div class="meta-cell">
+            <span>较前一层</span>
+            <b id="meta-delta">--</b>
+          </div>
+          <div class="meta-cell">
+            <span>本层特征图</span>
+            <b id="meta-feature">--</b>
+          </div>
+          <div class="meta-cell">
+            <span>十层推理耗时</span>
+            <b id="meta-latency">--</b>
+          </div>
+        </div>
+
+        <div class="samples">
+          <div class="samples-head">
+            <span>真实 MNIST 测试样本</span>
+            <small>点击载入</small>
+          </div>
+          <div class="sample-strip" id="sample-strip">
+            <span class="samples-empty">正在读取样本</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="layers" class="section" aria-labelledby="layers-title">
+      <div class="section-head">
+        <div>
+          <h2 id="layers-title">逐层识别率</h2>
+          <p>同一测试集上，每个卷积层后的判读头各自达到的准确率。点击层切换深度。</p>
+          <span class="scroll-tip">左右滑动查看全部 10 层</span>
+        </div>
+        <div class="section-figure">
+          <span>BEST PROBE</span>
+          <b id="best-acc">--</b>
+        </div>
+      </div>
+
+      <div class="layer-strip" id="layer-strip" aria-label="卷积层列表"></div>
+
+      <div class="layer-grid">
+        <div class="panel chart-panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <h3 class="panel-title">准确率曲线</h3>
+              <span class="panel-sub" id="chart-sub">等待训练指标</span>
+            </div>
+            <div class="chart-legend">
+              <span><i class="legend-line"></i>测试集准确率</span>
+              <span><i class="legend-dash"></i><b id="chart-reco" class="legend-reco">推荐深度</b></span>
+            </div>
+          </div>
+          <div class="chart-shell">
+            <div id="chart" class="chart"></div>
+            <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+          </div>
+        </div>
+
+        <div class="panel matrix-panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <h3 class="panel-title">混淆矩阵</h3>
+              <span class="panel-sub" id="matrix-sub">第 10 层 · 测试集</span>
+            </div>
+            <span class="mono matrix-scale">低 → 高</span>
+          </div>
+          <div class="matrix-shell" id="matrix"></div>
+          <div class="matrix-foot">
+            <span>行：真实数字</span>
+            <span>列：判读结果</span>
+            <span class="matrix-note" id="matrix-note">对角线越亮，判读越准</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="vision" class="section" aria-labelledby="vision-title">
+      <div class="section-head">
+        <div>
+          <h2 id="vision-title">CNN 内部</h2>
+          <p>同一笔迹在每层卷积后的特征图，以及 10 个判读头如何逐层改变答案。每次识别后自动播放一次前向传播。</p>
+        </div>
+        <div class="section-figure">
+          <span>ACTIVATIONS</span>
+          <b id="vision-figure">L10</b>
+        </div>
+      </div>
+
+      <div class="panel arch-panel">
+        <div class="panel-head">
+          <div class="panel-title-wrap">
+            <h3 class="panel-title">前向结构</h3>
+            <span class="panel-sub">点击卷积块切换判读深度</span>
+          </div>
+          <span class="mono arch-caption">1 × 28 × 28 → 10</span>
+        </div>
+        <div class="arch-scroll">
+          <div class="arch-flow" id="arch-flow" aria-label="CNN 前向结构图"></div>
+        </div>
+        <p class="scroll-tip arch-tip">左右滑动查看完整网络</p>
+      </div>
+
+      <div class="vision-grid">
+        <div class="panel feature-panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <h3 class="panel-title">特征图</h3>
+              <span class="panel-sub" id="feature-sub">等待一次识别</span>
+            </div>
+            <div class="feature-actions">
+              <span class="mono feature-meta" id="feature-meta">8 CH</span>
+              <button class="text-btn" id="feature-replay" type="button" disabled>重播</button>
+            </div>
+          </div>
+          <div class="feature-body">
+            <div class="feature-input">
+              <span>INPUT</span>
+              <canvas id="feature-input" width="112" height="112" aria-label="模型输入"></canvas>
+              <small>1 × 28 × 28</small>
+            </div>
+            <div class="feature-grid" id="feature-grid"></div>
+          </div>
+          <div class="feature-foot">
+            <span>显示激活方差最大的 8 个通道</span>
+            <span id="feature-density">激活密度 --</span>
+          </div>
+        </div>
+
+        <div class="panel evolution-panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <h3 class="panel-title">逐层判读</h3>
+              <span class="panel-sub">10 个探针的概率演化</span>
+            </div>
+            <span class="mono matrix-scale">0 → 1</span>
+          </div>
+          <div class="evolution" id="evolution"></div>
+          <p class="evolution-note" id="evolution-note">完成一次识别后显示每个深度的概率分布。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="train" class="section" aria-labelledby="train-title">
+      <div class="section-head">
+        <div>
+          <h2 id="train-title">训练控制台</h2>
+          <p>在本机 CPU 上重新训练，完成后自动热加载。数据为公开的 MNIST，首次使用自动下载。</p>
+        </div>
+        <div class="section-figure">
+          <span>LAST RUN</span>
+          <b id="last-run">--</b>
+        </div>
+      </div>
+
+      <div class="train-grid">
+        <div class="panel train-panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <h3 class="panel-title">训练任务</h3>
+              <span class="panel-sub" id="train-sub">选择轮次与样本量后开始</span>
+            </div>
+            <span class="train-status" id="train-status"><i class="dot"></i><span>空闲</span></span>
+          </div>
+
+          <form class="train-form" id="train-form">
+            <div class="field">
+              <label for="epochs">训练轮次</label>
+              <select id="epochs" name="epochs">
+                <option value="2">2 轮 · 快速查看</option>
+                <option value="4">4 轮</option>
+                <option value="6" selected>6 轮 · 推荐</option>
+                <option value="8">8 轮</option>
+                <option value="12">12 轮 · 更充分</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="train-size">训练样本</label>
+              <select id="train-size" name="train-size">
+                <option value="10000">10,000 张</option>
+                <option value="25000">25,000 张</option>
+                <option value="40000">40,000 张</option>
+                <option value="55000" selected>55,000 张 · 全量</option>
+              </select>
+            </div>
+            <div class="field field-action">
+              <label for="train-start">开始</label>
+              <button class="primary-btn" id="train-start" type="submit">开始训练</button>
+            </div>
+            <div class="field field-action is-hidden" id="stop-field">
+              <label for="train-stop">中断</label>
+              <button class="stop-btn" id="train-stop" type="button">停止训练</button>
+            </div>
+          </form>
+
+          <p class="train-estimate" id="train-estimate">预计用时 5 分钟 · 16 线程 CPU</p>
+
+          <div class="progress-block">
+            <div class="progress-head">
+              <span id="progress-epoch">EPOCH -- / --</span>
+              <span id="progress-batch">BATCH -- / --</span>
+              <span id="progress-loss">LOSS --</span>
+              <span id="progress-eta">ETA --</span>
+            </div>
+            <div class="progress-track"><i id="progress-fill"></i></div>
+            <div class="progress-foot">
+              <span id="progress-message">尚未开始训练</span>
+              <span id="progress-percent">0%</span>
+            </div>
+          </div>
+
+          <div class="log-block">
+            <div class="log-head">
+              <span>TRAIN LOG</span>
+              <span class="mono" id="log-state">IDLE</span>
+            </div>
+            <pre id="log" class="log" aria-live="polite">等待训练任务。</pre>
+          </div>
+
+          <div class="train-summary-label">当前模型 · 最近一次完成</div>
+          <div class="train-summary" id="train-summary">
+            <div><span>轮次</span><b>--</b></div>
+            <div><span>训练样本</span><b>--</b></div>
+            <div><span>批大小</span><b>--</b></div>
+            <div><span>用时</span><b>--</b></div>
+          </div>
+        </div>
+
+        <div class="panel facts-panel">
+          <div class="panel-head">
+            <h3 class="panel-title">数据与模型</h3>
+            <span class="mono">MNIST</span>
+          </div>
+
+          <div class="fact-block">
+            <div class="fact-head"><span>数据集</span><span id="data-total">--</span></div>
+            <p class="fact-lede">70,000 张 28 × 28 灰度手写数字，来自公开的 MNIST。默认按 55,000 / 5,000 / 10,000 划分，训练样本可选更小的子集。</p>
+            <div class="fact-rows">
+              <div><span>训练 / 验证 / 测试</span><b id="data-split">--</b></div>
+              <div><span>预处理</span><b>居中 · 20 px · 归一化</b></div>
+              <div><span>来源</span><b><a href="https://ossci-datasets.s3.amazonaws.com/mnist/" target="_blank" rel="noreferrer">ossci-datasets ↗</a></b></div>
+            </div>
+          </div>
+
+          <div class="fact-block">
+            <div class="fact-head"><span>网络</span><span id="model-params">--</span></div>
+            <div class="fact-rows">
+              <div><span>结构</span><b>10 × Conv3×3 + BN + ReLU</b></div>
+              <div><span>池化</span><b>第 2 / 4 / 6 层后</b></div>
+              <div><span>判读头</span><b>10 个独立判读探针</b></div>
+              <div><span>训练线程</span><b id="model-runtime">--</b></div>
+            </div>
+          </div>
+
+          <div class="fact-block history-block">
+            <div class="fact-head"><span>训练历史</span><span class="mono">VAL ACC</span></div>
+            <div class="history-list" id="history-list">
+              <span class="history-empty">尚无训练记录</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="brand-mark small" aria-hidden="true">
+          <i class="on"></i><i></i><i></i>
+          <i></i><i></i><i></i>
+          <i></i><i></i><i></i>
+        </span>
+        <span>层迹 / LAYER TRACE</span>
+      </div>
+      <p>数据 MNIST · 本地 CPU 推理 · 笔迹不会离开这台设备</p>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

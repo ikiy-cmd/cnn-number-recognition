@@ -1,0 +1,6 @@
+# CPU-only PyTorch wheel is resolved from the PyTorch index, see README.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+numpy==2.2.6
+fastapi==0.159.1
+uvicorn[standard]==0.54.0
